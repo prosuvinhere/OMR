@@ -4,13 +4,21 @@ import json
 import os
 from fpdf import FPDF
 
-# ── Auto-save Configuration ──────────────────────────────────────────────────
-AUTOSAVE_FILE = "omr_autosave.json"
+# ── Page config ──────────────────────────────────────────────────────────────
+st.set_page_config(page_title="OMR Grader", layout="wide", page_icon="📝")
 
-def load_state():
-    """Loads saved state from the local JSON file."""
-    if os.path.exists(AUTOSAVE_FILE):
-        with open(AUTOSAVE_FILE, "r") as f:
+# ── Multi-User Auto-save Configuration ───────────────────────────────────────
+def get_save_path(username):
+    """Generates a unique file path for each user."""
+    # Clean the username to prevent weird file names
+    safe_name = "".join([c for c in username if c.isalnum()]).lower()
+    return f"omr_data_{safe_name}.json"
+
+def load_state(username):
+    """Loads saved state for the specific user."""
+    filepath = get_save_path(username)
+    if os.path.exists(filepath):
+        with open(filepath, "r") as f:
             try:
                 return json.load(f)
             except json.JSONDecodeError:
@@ -18,37 +26,58 @@ def load_state():
     return {}
 
 def save_state():
-    """Saves the current student answers and answer key to a JSON file."""
+    """Saves the current user's state to their specific JSON file."""
+    # Ensure we know who is saving
+    username = st.session_state.get("current_user")
+    if not username:
+        return
+
     data_to_save = {
         "answer_key": st.session_state.get("answer_key", [])
     }
-    # Grab all student answers from session state
     for k, v in st.session_state.items():
         if k.startswith("student_ans_"):
             data_to_save[k] = v
             
-    with open(AUTOSAVE_FILE, "w") as f:
+    with open(get_save_path(username), "w") as f:
         json.dump(data_to_save, f)
 
-# ── Page config ──────────────────────────────────────────────────────────────
-st.set_page_config(page_title="OMR Grader", layout="wide", page_icon="📝")
+# ── User Login / ID Gate ─────────────────────────────────────────────────────
+st.title("📝 OMR Grader")
 
-# ── Initialize session state from auto-save ──────────────────────────────────
-saved_data = load_state()
+# If there is no user logged in, ask for their name and stop the rest of the app
+if "current_user" not in st.session_state:
+    st.info("👋 Welcome! Please enter your Name or ID to start your session.")
+    user_input = st.text_input("Enter User ID / Name:")
+    if st.button("Start Grading"):
+        if user_input.strip():
+            st.session_state.current_user = user_input.strip()
+            st.rerun() # Refresh the app to load their specific data
+        else:
+            st.warning("Please enter a valid ID.")
+    st.stop() # Halts execution here until a user is "logged in"
+
+# ── Initialize session state from user's auto-save ───────────────────────────
+username = st.session_state.current_user
+saved_data = load_state(username)
 
 if "answer_key" not in st.session_state:
     st.session_state.answer_key = saved_data.get("answer_key", [])
 
-# Pre-populate student answers if they exist in the saved file
 for i in range(1, 181):
     key = f"student_ans_{i}"
     if key not in st.session_state:
         st.session_state[key] = saved_data.get(key, None)
 
 # ── App header ────────────────────────────────────────────────────────────────
-st.title("📝 OMR Grader")
-st.markdown("Mark, key, evaluate — all in one place. **(180 Questions)**")
-st.caption("💾 *Auto-save is enabled. Your progress is saved locally.*")
+st.markdown(f"Mark, key, evaluate — all in one place. **(180 Questions)**")
+cols_header = st.columns([3, 1])
+with cols_header[0]:
+    st.caption(f"💾 *Auto-save active for user: **{username}***")
+with cols_header[1]:
+    if st.button("Log out / Switch User"):
+        st.session_state.clear()
+        st.rerun()
 st.divider()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -71,10 +100,10 @@ with tab1:
             col.radio(
                 f"Q{q:03d}",
                 options=[1, 2, 3, 4],
-                index=None, # Session state handles the default selection
+                index=None, 
                 horizontal=True,
                 key=f"student_ans_{q}",
-                on_change=save_state # Triggers save instantly on every click
+                on_change=save_state 
             )
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -97,7 +126,7 @@ with tab2:
 
             if len(answers) >= 180:
                 st.session_state.answer_key = answers[:180]
-                save_state() # Save the new answer key locally
+                save_state() 
                 st.success("✅ Answer key loaded — 180 questions parsed successfully.")
             else:
                 st.error(f"❌ Found {len(answers)} answers — need at least 180. Check your format.")
@@ -108,7 +137,6 @@ with tab2:
     if len(st.session_state.answer_key) == 180:
         final_answers = st.session_state.answer_key
 
-        # PDF generation
         class OMR_PDF(FPDF):
             def header(self):
                 self.set_font("Helvetica", "B", 18)
@@ -161,7 +189,6 @@ with tab2:
             for row_idx, ans in enumerate(col_answers):
                 q = start_idx + row_idx + 1
                 col.write(f"`Q{q:03d}`: Option **{ans}**")
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 3 — RESULTS
@@ -254,7 +281,7 @@ with tab3:
             st.download_button(
                 label="📄 Download Evaluated OMR PDF",
                 data=bytes(res_pdf.output()),
-                file_name="Evaluated_OMR_Results.pdf",
+                file_name=f"OMR_Results_{username}.pdf",
                 mime="application/pdf"
             )
 
