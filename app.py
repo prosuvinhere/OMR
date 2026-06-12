@@ -38,9 +38,15 @@ def save_state():
     for k, v in st.session_state.items():
         if k.startswith("student_ans_"):
             data_to_save[k] = v
-            
+
     with open(get_save_path(username), "w") as f:
         json.dump(data_to_save, f)
+
+def clear_answer(q):
+    """Resets a single question's answer to None (unchecked)."""
+    key = f"student_ans_{q}"
+    st.session_state[key] = None
+    save_state()
 
 # ── User Login / ID Gate ─────────────────────────────────────────────────────
 st.title("📝 OMR Grader")
@@ -88,23 +94,32 @@ tab1, tab2, tab3 = st.tabs(["① Fill answer sheet", "② Upload answer key", "�
 # ═════════════════════════════════════════════════════════════════════════════
 with tab1:
     st.header("Your answer sheet")
-    st.caption("Select your answer for each question.")
+    st.caption("Select your answer for each question. Use ✕ to clear a selection.")
 
     cols = st.columns(5)
     for col_idx, col in enumerate(cols):
         start_q = col_idx * 36
         end_q   = start_q + 36
-        
+
         col.subheader(f"Q{start_q+1:03d} – Q{end_q:03d}")
         for q in range(start_q + 1, end_q + 1):
-            col.radio(
-                f"Q{q:03d}",
-                options=[1, 2, 3, 4],
-                index=None, 
-                horizontal=True,
-                key=f"student_ans_{q}",
-                on_change=save_state 
-            )
+            with col.container(border=True):
+                st.radio(
+                    f"Q{q:03d}",
+                    options=[1, 2, 3, 4],
+                    index=None,
+                    horizontal=True,
+                    key=f"student_ans_{q}",
+                    on_change=save_state
+                )
+                st.button(
+                    "✕ Clear",
+                    key=f"clear_{q}",
+                    on_click=clear_answer,
+                    args=(q,),
+                    help=f"Clear Q{q:03d}",
+                    use_container_width=True
+                )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 2 — ANSWER KEY
@@ -126,7 +141,7 @@ with tab2:
 
             if len(answers) >= 180:
                 st.session_state.answer_key = answers[:180]
-                save_state() 
+                save_state()
                 st.success("✅ Answer key loaded — 180 questions parsed successfully.")
             else:
                 st.error(f"❌ Found {len(answers)} answers — need at least 180. Check your format.")
@@ -142,7 +157,7 @@ with tab2:
                 self.set_font("Helvetica", "B", 18)
                 self.cell(0, 10, "OMR Answer Key Reference", align="C", new_x="LMARGIN", new_y="NEXT")
                 self.set_font("Helvetica", "", 10)
-                self.cell(0, 6, "180 Questions - formatted into vertical columns", align="C", new_x="LMARGIN", new_y="NEXT")   
+                self.cell(0, 6, "180 Questions - formatted into vertical columns", align="C", new_x="LMARGIN", new_y="NEXT")
                 self.line(10, 30, 200, 30)
                 self.ln(10)
 
@@ -185,7 +200,7 @@ with tab2:
             start_idx = col_idx * 36
             col_answers = final_answers[start_idx: start_idx + 36]
             col.write(f"**Q{start_idx+1:03d} – Q{start_idx+36:03d}**")
-            
+
             for row_idx, ans in enumerate(col_answers):
                 q = start_idx + row_idx + 1
                 col.write(f"`Q{q:03d}`: Option **{ans}**")
@@ -255,16 +270,16 @@ with tab3:
                 for row_idx, d in enumerate(eval_data[start_q : start_q + 36]):
                     y_off = start_y + row_idx * 6.5
                     q_num = d["q"]
-                    
+
                     res_pdf.set_xy(x_off, y_off)
                     res_pdf.set_font("Helvetica", "B", 9)
                     res_pdf.cell(8, 5, f"{q_num:03d}", align="R")
-                    
+
                     for opt in [1, 2, 3, 4]:
                         cx = x_off + 10 + opt * 5.5
                         cy = y_off + 2.5
                         r  = 2.2
-                        
+
                         if d["status"] == "correct" and opt == d["ca"]:
                             fill_c, draw_c, style = (45, 198, 83), (45, 198, 83), "DF"  # Green
                         elif d["status"] == "wrong" and opt == d["sa"]:
@@ -273,7 +288,7 @@ with tab3:
                             fill_c, draw_c, style = (248, 150, 30), (248, 150, 30), "DF"  # Orange
                         else:
                             fill_c, draw_c, style = (255, 255, 255), (150, 150, 150), "D" # Empty
-                            
+
                         res_pdf.set_fill_color(*fill_c)
                         res_pdf.set_draw_color(*draw_c)
                         res_pdf.ellipse(cx - r, cy - r, r * 2, r * 2, style=style)
@@ -289,12 +304,12 @@ with tab3:
             st.divider()
             st.subheader("Detailed breakdown")
             st.markdown("✅ **Correct** | ❌ **Wrong** | ⚪ **Unattempted**")
-            
+
             res_cols = st.columns(5)
             for col_idx, col in enumerate(res_cols):
                 start_idx = col_idx * 36
                 col.write(f"**Q{start_idx+1:03d} – Q{start_idx+36:03d}**")
-                
+
                 for d in eval_data[start_idx: start_idx + 36]:
                     icon = "✅" if d["status"] == "correct" else "❌" if d["status"] == "wrong" else "⚪"
                     sa_str = d["sa"] if d["sa"] else "-"
