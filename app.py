@@ -1,17 +1,54 @@
 import streamlit as st
 import re
+import json
+import os
 from fpdf import FPDF
+
+# ── Auto-save Configuration ──────────────────────────────────────────────────
+AUTOSAVE_FILE = "omr_autosave.json"
+
+def load_state():
+    """Loads saved state from the local JSON file."""
+    if os.path.exists(AUTOSAVE_FILE):
+        with open(AUTOSAVE_FILE, "r") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return {}
+    return {}
+
+def save_state():
+    """Saves the current student answers and answer key to a JSON file."""
+    data_to_save = {
+        "answer_key": st.session_state.get("answer_key", [])
+    }
+    # Grab all student answers from session state
+    for k, v in st.session_state.items():
+        if k.startswith("student_ans_"):
+            data_to_save[k] = v
+            
+    with open(AUTOSAVE_FILE, "w") as f:
+        json.dump(data_to_save, f)
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="OMR Grader", layout="wide", page_icon="📝")
 
-# ── Session state ─────────────────────────────────────────────────────────────
+# ── Initialize session state from auto-save ──────────────────────────────────
+saved_data = load_state()
+
 if "answer_key" not in st.session_state:
-    st.session_state.answer_key = []
+    st.session_state.answer_key = saved_data.get("answer_key", [])
+
+# Pre-populate student answers if they exist in the saved file
+for i in range(1, 181):
+    key = f"student_ans_{i}"
+    if key not in st.session_state:
+        st.session_state[key] = saved_data.get(key, None)
 
 # ── App header ────────────────────────────────────────────────────────────────
 st.title("📝 OMR Grader")
 st.markdown("Mark, key, evaluate — all in one place. **(180 Questions)**")
+st.caption("💾 *Auto-save is enabled. Your progress is saved locally.*")
 st.divider()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -34,9 +71,10 @@ with tab1:
             col.radio(
                 f"Q{q:03d}",
                 options=[1, 2, 3, 4],
-                index=None,
+                index=None, # Session state handles the default selection
                 horizontal=True,
-                key=f"student_ans_{q}"
+                key=f"student_ans_{q}",
+                on_change=save_state # Triggers save instantly on every click
             )
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -59,6 +97,7 @@ with tab2:
 
             if len(answers) >= 180:
                 st.session_state.answer_key = answers[:180]
+                save_state() # Save the new answer key locally
                 st.success("✅ Answer key loaded — 180 questions parsed successfully.")
             else:
                 st.error(f"❌ Found {len(answers)} answers — need at least 180. Check your format.")
@@ -75,7 +114,7 @@ with tab2:
                 self.set_font("Helvetica", "B", 18)
                 self.cell(0, 10, "OMR Answer Key Reference", align="C", new_x="LMARGIN", new_y="NEXT")
                 self.set_font("Helvetica", "", 10)
-                self.cell(0, 6, "180 Questions - formatted into vertical columns", align="C", new_x="LMARGIN", new_y="NEXT")    
+                self.cell(0, 6, "180 Questions - formatted into vertical columns", align="C", new_x="LMARGIN", new_y="NEXT")   
                 self.line(10, 30, 200, 30)
                 self.ln(10)
 
